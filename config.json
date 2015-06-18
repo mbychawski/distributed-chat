@@ -1,0 +1,25 @@
+{
+    "nodesRing" : [
+        {
+            "host" : "192.168.0.17",
+            "port" : 45000,
+            "clientsPort" : 50000
+        },
+        {
+            "host" : "192.168.0.20",
+            "port"    : 45000,
+            "clientsPort" : 45051
+        },
+        {
+            "host" : "192.168.0.21",
+            "port"    : 45000,
+            "clientsPort" : 45052
+        },
+        {
+            "host" : "192.168.0.22",
+            "port"    : 45000,
+            "clientsPort" : 45052
+        }
+    ],
+    "localNodeNo" : 2
+}

@@ -1,0 +1,275 @@
+//////////////////////////////////////////////////
+//
+//  To jest nieoficjalny opis działania systemu
+//
+/////////////////////////////////////////////////
+
+Każdy musi napsać dwa programy: Węzeł (węzeł może przyjmować funkcję serwera) oraz klienta.
+
+---
+Piter:  C#          Asambler
+Wookie: Pythong     ANSI C, moduł jądra Linuxa
+Mr 1st: Node JS     Fortran
+---
+////////////////////////////////////////////////////////////
+// WĘZEŁ
+////////////////////////////////////////////////////////////
+    1. Komunikacja z innymi węzłami
+        - przeprowadzenie elekcji
+        - wymiana informacji o posiadanych klientach
+        - proces zestawiania połączenia z innymi klientami
+        - wykrywanie stanów awarii i reagowanie na nie
+
+    2. Komunikacja z Klientami
+        - Rejestracja klienta w węźle / wyrejstrowanie
+        - Proces zestawiania połączenia / i zakańczania
+
+    SERWER
+        - przechowuje informacje o węzłach systemu
+        - otrzymuje informacje o klientach podłączonych do innych węzłów i je przechowuje,
+        - odpowiada na zapytania o dostępne klienty,
+        - odpowiada na zapytanie o lokalizację klienta (pośredniczy w procesie zestyawiania połączenia)
+
+///////////////////////////////////////////////////////////
+// KLIENT
+///////////////////////////////////////////////////////////
+    To proste. Komunikacja z lokalnym węzłem.
+    - rejestracja / wyrejestrowania
+    - prośba o nawiązanie połączenia z innym klientem
+    - pobranie listy dostepnych klientów
+    - komunikacja z innym klientem
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+Komunikacja Węzeł - Węzeł
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+* Każdy węzeł posiada listę adresów IP, na których potencjalnie mogą znajdować się inne węzły (dowolna liczba).
+* w każdym wysyłanym komunikacie prezekazywany jest również numer ostniej znanej węzłowi elekcji
+    zawsze, gdy elNo taki sam:
+        {
+            type: '<zapytanie>-ack'
+        }
+    jeżeli niższy:
+         {
+            type : 'election-break',
+            elNo : <tamen numer>,
+            server: <ip serwera>
+        }
+    jeżeli wyższy: coś jest nie tak...
+
+* algorytm elekcji - pierścieniowy (wzorowany na: http://students.mimuw.edu.pl/SR-ZSI/Wyklady-html/03_synchro/03_synchro.html#pierscien)
+
+1) Węzeł dołącza się do sieci
+    wysyła do najbliższego sąsiada (kolejny numer IP)
+        {
+            'type': 'election',
+            'members' : [
+                {
+                    ip: <ip>,
+                    elNo : <ostatnia znana elekcja>
+                },
+                ...
+            ]
+        }
+    jeżeli lokalny numer elekcji jest <=, odpowiada
+        {
+            type : 'election-ack'
+        }
+
+    jeżeli większy, oznacza to, że nadawca nie wie o poprzednio dokonanej elekcji, odpowiada
+        {
+            type : 'election-break',
+            elNo : <tamen numer>,
+            server: <ip serwera>
+        }
+        elekcja zostaje przerwana, węzeł przechodzi do rejestracji w serwerze.
+
+    tak dalej kraży po pierścieniu aż dotrze do inicjatora (węzły, które nie odpowiadają są omijane - konfigurowalny timeout).
+    ustala jako serwer węzeł o najwyższym ip i inkrementuje numer elekcji.
+    wysyła komunikat 'election-done'
+        {
+            'type': 'election-done',
+            'members' : [
+                {
+                    ip: <ip>,
+                    elNo : <ostatnia znana elekcja>
+                    recieved: <true ustawiane przez właściela tego ip>
+                },
+                ...
+            ]
+        }
+    komunikat jest wysyłany po pierścieniu ale tylko do węzłów znajdujących się na liście.
+    po okrążeniu pierścienia kounikat nie jest przesyłany dalej. W ten sposób każdy węzeł dowiaduje się kto został wybrany.
+
+2) Węzeł rejestruje się u serwera, albo aktualizuje listę klientów
+    *elekcja została przeprowadzona, znany jest adres serwera
+    *serwer wie, że został wybrany i prosi inne węzły o ic listę: 'ping'
+
+    węzeł wysyła:
+        {
+            type: 'node-update',
+            elNo: '...',
+            clients : [
+                {
+                    id: <GUID>,
+                    name: '',
+                },
+                ...
+            ]
+        }
+    odpowiedź:
+        {
+            type: 'node-update-ack'
+        }
+
+3) Węzeł prosi o listę klientów
+    -->
+    {
+        type: 'get-clients',
+        elNo: ...
+    }
+    <--
+    {
+        type: 'clients-list',
+        clients: [
+            {
+                node: <ip>,
+                id: <GUID>,
+                name: ''
+            },
+            ...
+        ]
+    }
+
+4) Węzeł kończy działanie
+    {
+        type: 'node-bye'
+    }
+
+5) Węzeł chce wysłać wiadomość od klienta do klienta
+    - lokalny klient prosi o połączenie z innym
+    - węzeł sprawdza, czy klient nie jest dostępny lokalnie, jak jest to przekazuje wiadomość do lokalnego klienta.
+    - pyta serwer o listę klientów (jeżeli wcześniej tego nie zrobił),
+    - sprawdza na jakim węźle działa klient,
+    - jeżeli posiada połączenie tcp z tym węzłem to go używa a jak nie to tworzy (połączenie zostanie zakończone po ustalonym czasie bezczynności na tym łączu)
+    - wysyła do tamtego węzła:
+    {
+        type: 'message',
+        elNo: ...,
+        client-from: {id: <GUID> , name: ''},
+        client-to: ...,
+        message: 'dupa dupa'
+        timestamp: ...
+    }
+
+    * węzeł może nie odpowiadać --> patrz co robimy jak węzeł nie odpowiada
+
+    węzeł docelowy komunikuje się z kientem docelowym i odpowiada:
+    {
+        type: 'message-ack',
+        client-from: {id: <GUID> , name: ''},
+        client-to: ...,
+        timestamp:
+    }
+    albo
+    węzeł może odpowiedzieć, ze klient nie odpowiada albo węzeł może nieodpowiadać
+    {
+        type: 'message-fail',
+        client-from: {id: <GUID> , name: ''},
+        client-to: ...,
+        timestamp:
+    }
+    klient jest powiadomiony o niedostarczeniu wiadomości,
+    więzeł aktualizuje listę klientów (i powiadamia o niej lokelne klienty)
+
+6) Sytuacje kryzysowe
+    * serwer nieodpowiada -- reelekcja
+    * węzeł (nie serwer) nie odpowiada -- informujemy o tym zdarzeniu serwer
+        {
+            type: 'node-down',
+            ip:
+            elNo:
+        }
+
+        serwer się upewnia wysyłając
+        -->
+        {
+            type: 'ping',
+            elNo:
+        }
+        <--
+        {
+            type: 'node-update',
+            ...
+        }
+
+        serwer aktualizuje listę i przesyła ją do zgłasdzającego błąd: 'clients-list'
+    * łączę się na nowo, dostaję election-break z informacją że jestem serwerem..... WTF?... Reelekcja.
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+Komunikacja klient - Węzeł
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+1) klient się włącza / rozłącza
+    -->
+    {
+        type: 'connect',
+        id:
+        name:
+    }
+
+    <--
+    {
+        type: 'clients-list',
+        list: [
+        	{id: <GUID> , name: ''}
+            ...
+        ]
+    }
+
+    rozłącza - zakańcza połaczenie tcp
+
+2) klient prosi o aktualizację listy innych klientów
+    -->
+    {
+        type: 'get-clients'
+    }
+
+    <--
+    {
+        type: 'clients-list',
+        list: [
+        	{id: <GUID> , name: ''}
+            ...
+        ]
+    }
+
+3) Klient wysyła wiadomość
+    -->
+    {
+        type: 'message',
+        client-from: {id: <GUID> , name: ''},
+        client-to: ...,
+        message: 'dupa dupa'
+        timestamp: ...
+    }
+
+    <--
+    {
+        type: 'message-ack',
+        client-from: {id: <GUID> , name: ''},
+        client-to: ...,
+        timestamp:
+    }
+    albo
+    {
+        type: 'message-fail',
+        client-from: {id: <GUID> , name: ''},
+        client-to: ...,
+        timestamp:
+    }
+
+
